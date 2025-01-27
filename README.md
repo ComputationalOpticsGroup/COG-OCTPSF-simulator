@@ -6,11 +6,11 @@ Simulator of optical coherence tomography's point-spread function with aberratio
 
 This simulation code is released by [Computational Optics Group at the University of Tsukuba](https://cog-news.blogspot.com/), and was developed as a part of our research projects of computationally augmented optical coherence microscope and optical coherence tomography.
 
-## Citations
+<!-- ## Citations
 
 Please consider cite the following papers if you use this code.
 
-- [arXiv]()
+- [arXiv]() -->
 
 ## License
 
