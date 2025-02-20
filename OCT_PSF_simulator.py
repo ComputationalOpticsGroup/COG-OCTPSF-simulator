@@ -666,8 +666,8 @@ def pupil_col(qx, qy, COLMODE='Gauss'):
     match COLMODE:
         case 'Gauss':
             return gauss_trunc(
-                - 2 * np.pi * fy / kbc,
-                - 2 * np.pi * fx / kbc,
+                qx,
+                qy,
                 na_w_2,
                 na_coff_2,
                 smooth_edge=True if GMODE == 'PSF' else False
@@ -815,8 +815,8 @@ for i, kb_i in enumerate(kb):
 
     if MODE != 'SCFF':
         F = pupil_ill(
-            - 2 * np.pi * fy / kbc,
-            - 2 * np.pi * fx / kbc,
+            -(2 * np.pi / kb_i) * fy,
+            -(2 * np.pi / kb_i) * fx,
             ILLMODE
         ) * np.exp(
             kb_i * 1j *
