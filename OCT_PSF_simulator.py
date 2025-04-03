@@ -21,6 +21,7 @@ from sim_modules.plottings import (
     PSFDict,
     HORIZONTAL_FREQ_LABEL,
     VERTICAL_FREQ_LABEL,
+    HORIZONTAL_COS_LABEL,
     OPL_LABEL,
     plot_2Dpupil,
     plot_3Dpupil,
@@ -99,7 +100,6 @@ plt.ylabel("Spectral density [a.u.]")
 # In the case of the different optical path, the wavefront aberration should be defined separately.
 
 ns = [(2, 2), (3, 1), (3, 3), (4, 0)]  # Zernike expansion orders
-# coeff = [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0]  # Zernike expansion coefficients (RMS) [µm]
 coeff = [(0.2, -0.05), (0.04, -0.032), (0.0, 0.0), -0.1]  # Zernike expansion coefficients (RMS) [µm]
 
 # %%
@@ -162,14 +162,26 @@ match IMG_MODE:
 
 # %%
 # 2D plot of the illumination pupil
-if IMG_MODE != 'SCFF':
-
-    plot_2Dpupil(
-        pupil_ill,
-        σxc_ill,
-        σyc_ill,
-        'illumination'
-    )
+match IMG_MODE:
+    case 'SCFF':
+        pass
+    case 'LF':
+        P = pupil_ill.pupil2D(σxc_ill, σyc_ill)
+        plt.plot(σxc_ill[0], P[0])
+        plt.title(
+            "Pupil (illumination).\n"
+            "Cut-off NA: {}".format(
+                pupil_ill.na_co
+            )
+        )
+        plt.xlabel(HORIZONTAL_COS_LABEL)
+    case 'PSFD':
+        plot_2Dpupil(
+            pupil_ill,
+            σxc_ill,
+            σyc_ill,
+            'illumination'
+        )
 
 # %%
 # 3D surface plot of the illumination pupil
@@ -202,12 +214,22 @@ plot_3Dpupil(
 
 # %%
 # 2D plot of wavefront error in illumination pupil
-plot_wavefronterror(
-    pupil_ill,
-    σxc_ill,
-    σyc_ill,
-    'illumination'
-)
+match IMG_MODE:
+    case 'SCFF':
+        pass
+    case 'LF':
+        pupil_ill.set_wavefront_error(σxc_ill, σyc_ill)
+        W_ill = pupil_ill.we
+        plt.plot(σxc_ill[0], W_ill[0])
+        plt.title("Wavefront error of the illumination pupil.")
+        plt.xlabel(HORIZONTAL_COS_LABEL)
+    case 'PSFD':
+        plot_wavefronterror(
+            pupil_ill,
+            σxc_ill,
+            σyc_ill,
+            'illumination'
+        )
 
 # %%
 # 2D plot of wavefront error in collection pupil
@@ -358,7 +380,7 @@ for i in range(z.size):
 psf_dict = PSFDict()
 psf_dict.update(
     {'psf': psf, 'x': xd, 'defocus': -z, 'opl': ld,
-        'desc': 'Raw', 'MODE': IMG_MODE}
+     'desc': 'Raw', 'MODE': IMG_MODE}
 )
 
 # %%
@@ -368,15 +390,15 @@ plot_psfs_xl(psf_dict)
 plot_psfs_yl(psf_dict)
 
 # %%
-for i in range(zs.size):
+for i in range(z.size):
     plot_psf_xl(psf_dict, i=i, show_FWHM=False)
 
 # %%
-for i in range(zs.size):
+for i in range(z.size):
     plot_psf_yl(psf_dict, i=i, show_FWHM=False)
 
 # %%
-for i in range(zs.size):
+for i in range(z.size):
     plot_psf_xy(psf_dict, i=i, num=None, l_i_s=0, show_FWHM=False)
 
 # %%
@@ -417,7 +439,7 @@ plt.colorbar(label='Amplitude')
 
 # %%
 z_i = 1
-l_i = np.argmin(np.abs(ld[:, z_i] + nb * zs[z_i]))
+l_i = np.argmin(np.abs(ld[:, z_i] - nb * zs[z_i]))
 plt.pcolormesh(
     νx, νy,
     unwrap_phase(np.angle(h_OCT[:, :, z_i, l_i])),
@@ -442,7 +464,7 @@ plt.colorbar(label='Amplitude')
 # index corresponding to zs
 zi = 1
 assert np.abs(l).max() > np.abs(zs[zi])
-zs_i = np.argmin(np.abs(l + nb * zs[zi]))
+zs_i = np.argmin(np.abs(l - nb * zs[zi]))
 
 l[zs_i]
 
@@ -542,15 +564,15 @@ plot_psfs_yl(psf_rf_dict)
 plot_axial_psf(psf_rf_dict, i=1)
 
 # %%
-for i in range(zs.size):
+for i in range(z.size):
     plot_psf_xl(psf_rf_dict, i=i, show_FWHM=False)
 
 # %%
-for i in range(zs.size):
+for i in range(z.size):
     plot_psf_yl(psf_rf_dict, i=i, show_FWHM=False)
 
 # %%
-for i in range(zs.size):
+for i in range(z.size):
     plot_psf_xy(psf_rf_dict, i=i, num=None, l_i_s=-0, show_FWHM=False)
 
 # %%
@@ -610,7 +632,7 @@ for i in range(z.size):
 psf_isam_dict = PSFDict()
 psf_isam_dict.update(
     {'psf': psf_isam, 'x': xd_isam, 'defocus': -z, 'z': zd_isam,
-        'desc': 'ISAM ({})'.format(REFOCUS_MODE), 'MODE': IMG_MODE}
+     'desc': 'ISAM ({})'.format(REFOCUS_MODE), 'MODE': IMG_MODE}
 )
 
 # %%

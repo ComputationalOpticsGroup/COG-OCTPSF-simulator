@@ -17,6 +17,7 @@ from sim_modules.plottings import (
     LOCATION_Y,
     LOCATION_Z,
     LOCATION_XY,
+    CTF_AMP_LABEL,
     plot_2Dpupil,
     plot_3Dpupil,
     plot_wavefronterror,
@@ -280,8 +281,8 @@ h_tilde = np.zeros((νy_num, νx_num) + z.shape + k.shape, dtype=np.complex64)
 ill_amp = np.zeros(k.shape, dtype=np.float32)
 col_amp = np.zeros(k.shape, dtype=np.float32)
 
-f_zp_ill = np.zeros(z.shape + k.shape, dtype=np.float64)
-f_zp_col = np.zeros(z.shape + k.shape, dtype=np.float64)
+f_zp_ill = np.zeros(z.shape + k.shape, dtype=np.complex64)
+f_zp_col = np.zeros(z.shape + k.shape, dtype=np.complex64)
 
 aperture = Aperture(pupil_ill, pupil_col, IMG_MODE)
 
@@ -299,9 +300,35 @@ for i, kb_i in enumerate(kb):
         ill_amp[i] = aperture.ill_amp
         col_amp[i] = aperture.col_amp
 
-    if SIM_MODE.startswith('CTF'):
-        f_zp_ill[..., i] = np.nansum(aperture.ftilde_ill, axis=(0, 1))
-        f_zp_col[..., i] = np.nansum(aperture.ftilde_col, axis=(0, 1))
+    f_zp_ill[..., i] = np.nansum(aperture.ftilde_ill, axis=(0, 1))
+    f_zp_col[..., i] = np.nansum(aperture.ftilde_col, axis=(0, 1))
+
+# %%
+# Plot Gouy phase shift
+ki = 1
+plt.plot(np.sort(z), np.abs(f_zp_ill[np.argsort(z), ki]))
+plt.xlabel(AXIAL_LABEL)
+plt.ylabel("Amplitude [µm$^{-1}$]")
+plt.title("Amplitude of axial profile of illumination field at wavelength {0:.3f} nm.".format(2 * np.pi * nb / kb[ki]))
+plt.show()
+
+plt.plot(np.sort(z), np.unwrap(np.angle(f_zp_ill[..., ki] * np.exp(1.0j * kb[ki] * z)))[np.argsort(z)])
+plt.xlabel(AXIAL_LABEL)
+plt.ylabel("Gouy phase shift [rad]")
+plt.title("Gouy phase shift of illumination field at wavelength {0:.3f} nm.".format(2 * np.pi * nb / kb[ki]))
+plt.show()
+
+plt.plot(np.sort(z), np.abs(f_zp_col[np.argsort(z), ki]))
+plt.xlabel(AXIAL_LABEL)
+plt.ylabel("Amplitude [µm$^{-1}$]")
+plt.title("Amplitude of axial profile of collection field at wavelength {0:.3f} nm.".format(2 * np.pi * nb / kb[ki]))
+plt.show()
+
+plt.plot(np.sort(z), np.unwrap(np.angle(f_zp_col[..., ki] * np.exp(1.0j * kb[ki] * z)))[np.argsort(z)])
+plt.xlabel(AXIAL_LABEL)
+plt.ylabel("Gouy phase shift [rad]")
+plt.title("Gouy phase shift of collection field at wavelength {0:.3f} nm.".format(2 * np.pi * nb / kb[ki]))
+plt.show()
 
 # %%
 plottings.display_gamma = 1.0
@@ -369,6 +396,7 @@ else:
 plt.plot(νz, np.abs(H[νy_num // 2, νx_num // 2, :]))
 plt.xlim(νz12[0], νz12[1])
 plt.xlabel(AXIAL_FREQ_LABEL)
+plt.ylabel(CTF_AMP_LABEL)
 np.argmax(np.abs(H[νy_num // 2, νx_num // 2, :]))
 
 # %%
@@ -407,8 +435,7 @@ xd = np.linspace(x12[0], x12[1], num=xd_num, endpoint=True)
 
 ht = sp.signal.zoom_fft(
     sp.signal.zoom_fft(
-        h_tilde[..., ki] *
-        (kb[ki] ** 2 / (4 * np.pi)),
+        h_tilde[..., ki],
         x12, fs=1/dνx, m=xd_num, axis=1
     ) * dνx,
     x12, fs=1/dνy, m=xd_num, axis=0
