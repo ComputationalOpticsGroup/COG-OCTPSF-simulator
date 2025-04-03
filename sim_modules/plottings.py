@@ -514,7 +514,7 @@ def plot_3Dpupil(pupil: Pupil3D, σx: NDArray, σy: NDArray, NAME: str = ''):
     σz[P == 0.0] = np.nan
 
     # Set up plot
-    fig, ax = plt.subplots(subplot_kw=dict(projection='3d'))
+    fig, ax = plt.subplots(subplot_kw=dict(projection='3d'), layout='constrained')
     ls = LightSource(270, 45)
     rgb = ls.shade(
         P,
@@ -528,7 +528,7 @@ def plot_3Dpupil(pupil: Pupil3D, σx: NDArray, σy: NDArray, NAME: str = ''):
         antialiased=False, shade=False, alpha=0.1
     )
 
-    ax.view_init(elev=-15, azim=0, roll=90)
+    ax.view_init(elev=60, azim=20, roll=110)
 
     ax.set_zlim(np.nanmin(σz), 0)
 
@@ -547,8 +547,6 @@ def plot_3Dpupil(pupil: Pupil3D, σx: NDArray, σy: NDArray, NAME: str = ''):
             pupil.na_co
         )
     )
-
-    fig.show()
 
 
 def plot_wavefronterror(pupil: AberratedPupil3D, σx: NDArray, σy: NDArray,
