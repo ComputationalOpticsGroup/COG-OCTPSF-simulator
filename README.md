@@ -12,6 +12,22 @@ Please consider cite the following papers if you use this code.
 
 - The details of OCT image formation theory with aberrations and computational aberration correction can be found in [Makita et al., arXiv (2025)](https://doi.org/10.48550/arXiv.2501.15011)
 
+```
+@misc{makita_image_2025,
+  title = {Image Formation Theory of Optical Coherence Tomography with Optical Aberrations and Its Application for Computational Aberration Correction},
+  author = {Makita, Shuichi and Fukutake, Naoki and Zhu, Lida and Yasuno, Yoshiaki},
+  year = {2025},
+  month = jan,
+  number = {arXiv:2501.15011},
+  eprint = {2501.15011},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2501.15011},
+  url = {http://arxiv.org/abs/2501.15011},
+  archiveprefix = {arXiv},
+  howpublished = {arXiv:2501.15011}
+}
+```
+
 ## License
 
 This code is licensed under either of the following options.
