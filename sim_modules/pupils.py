@@ -2,15 +2,35 @@ import numpy as np
 from scipy.special import jacobi
 from typing import Tuple
 from numpy.typing import NDArray
+from enum import Enum, auto
+
+
+class PupilType(Enum):
+    """Enum for pupil types"""
+    CIRC = auto()
+    """Circular pupil
+    """
+    RECT = auto()
+    """Rectangular pupil
+    """
+    GAUSS = auto()
+    """Gaussian pupil
+    """
+    HANN = auto()
+    """2D Hann pupil
+    """
+    BESSEL = auto()
+    """Bessel beam pupil
+    """
 
 
 class Pupil3D:
-    def __init__(self, MODE: str, na_co: float | Tuple, **kwargs):
+    def __init__(self, pupil_type: PupilType, na_co: float | Tuple[float], **kwargs):
         """Initialize the Pupil class
 
         Parameters
         ----------
-        MODE : str
+        pupil_type : PupilType
             Pupil type, can be 'Gauss', 'Hann', 'Bessel', 'circ', or 'rect'
         na_co : float
             Cut-off NA
@@ -21,22 +41,22 @@ class Pupil3D:
                 Width of the Bessel pupil ring (only for 'Bessel' mode)
         """
 
-        match MODE:
-            case 'circ':
+        match pupil_type:
+            case PupilType.CIRC:
                 def pupil_func(σx, σy):
                     return circ(
                         σx,
                         σy,
                         na_co
                     )
-            case 'rect':
+            case PupilType.RECT:
                 def pupil_func(σx, σy):
                     return rect(
                         σx,
                         σy,
                         na_co
                     )
-            case 'Gauss':
+            case PupilType.GAUSS:
                 try:
                     na_w = kwargs['na_w']
                 except KeyError:
@@ -50,14 +70,14 @@ class Pupil3D:
                         na_w,
                         na_co
                     )
-            case 'Hann':
+            case PupilType.HANN:
                 def pupil_func(σx, σy):
                     return Hann_2d_circ(
                         σx,
                         σy,
                         na_co
                     )
-            case 'Bessel':
+            case PupilType.BESSEL:
                 try:
                     w = kwargs['w']
                 except KeyError:
@@ -72,15 +92,16 @@ class Pupil3D:
                         w
                     )
             case _:
-                raise ValueError("Invalid illumination mode")
+                raise ValueError("Invalid pupil type")
 
         self.pupil2D = pupil_func
         self.na_co = na_co
         if np.isscalar(self.na_co):
-            self.na_co_max = self.na_co
+            self.na_co_max: float = self.na_co
         else:
             self.na_co_max = max(self.na_co)
-        self.MODE = MODE
+        self.pupil_type = pupil_type
+        self.reverse = False
 
     def __call__(self, σx: NDArray, σy: NDArray, k: float, z: NDArray,
                  PARAXIAL=False) -> NDArray:
@@ -88,36 +109,35 @@ class Pupil3D:
 
         Parameters
         ----------
-        σx : 2D ndarray
+        σx : 2D NDArray
             Horizontal pupil coordinate
-        σy : 2D ndarray
+        σy : 2D NDArray
             Vertical pupil coordinate
         k : float
             Wave number
-        z : 1D ndarray
+        z : 1D NDArray
             Axial coordinate
 
         Returns
         -------
-        ndarray
+        NDArray
             3D pupil function, h-tilde
         """
         return self.calc_ftilde(σx, σy, k, z, PARAXIAL)
 
-    def calc_sigma_z(self, σx: NDArray, σy: NDArray, PARAXIAL=False
-                     ) -> NDArray:
+    def calc_sigma_z(self, σx: NDArray, σy: NDArray, PARAXIAL=False) -> None:
         """Calculate the sigma_z value for the pupil function
 
         Parameters
         ----------
-        σx : ndarray
+        σx : NDArray
             Horizontal pupil coordinate
-        σy : ndarray
+        σy : NDArray
             Vertical pupil coordinate
 
         Returns
         -------
-        ndarray
+        NDArray
             Sigma_z value for the pupil function
         """
         if PARAXIAL:
@@ -133,19 +153,23 @@ class Pupil3D:
 
         Parameters
         ----------
-        σz : 2D ndarray
+        σz : 2D NDArray
             Horizontal pupil coordinate
         k : float
             Wave number
-        z : 1D ndarray
+        z : 1D NDArray
             Axial coordinate
 
         Returns
         -------
-        ndarray
+        NDArray
             Propagation factor for the pupil function
         """
-        return np.exp(-1j * k * σz[..., None] * z[None, None, ...])
+        if self.reverse:
+            a = -1.0
+        else:
+            a = 1.0
+        return np.exp(-1j * k * a * σz[..., None] * z[None, None, ...])
 
     def calc_ftilde(self, σx: NDArray, σy: NDArray, k: float, z: NDArray,
                     PARAXIAL=False) -> NDArray:
@@ -153,18 +177,18 @@ class Pupil3D:
 
         Parameters
         ----------
-        σx : 2D ndarray
+        σx : 2D NDArray
             Horizontal pupil coordinate
-        σy : 2D ndarray
+        σy : 2D NDArray
             Vertical pupil coordinate
         k : float
             Wave number
-        z : 1D ndarray
+        z : 1D NDArray
             Axial coordinate
 
         Returns
         -------
-        3D ndarray
+        3D NDArray
             h-tilde value for the pupil function
         """
         self.calc_sigma_z(σx, σy, PARAXIAL)
@@ -173,45 +197,9 @@ class Pupil3D:
             self.propagation_factor(self.σ[2], k, z)
         )
 
-    def lens_dyad(self) -> NDArray:
-        """Calculate the lens dyad for the pupil function
-
-        Lens dyad
-        M. Totzeck, "Polarization influence on imaging," J. Micro/Nanolith. MEMS MOEMS 4, 031108 (2005).
-
-        Returns
-        -------
-        2D ndarray
-            Lens dyad for the pupil function
-        """
-        return np.array(
-            [[1 - self.𝛔[0] ** 2 / (1 + self.𝛔[2]),
-              - self.𝛔[0] * self.𝛔[1] / (1 + self.𝛔[2])],
-             [- self.𝛔[0] * self.𝛔[1] / (1 + self.𝛔[2]),
-              1 - self.𝛔[1] ** 2 / (1 + self.𝛔[2])],
-             [- self.𝛔[0], - self.𝛔[1]]]
-            )
-
-    def green_function_dyad(self) -> NDArray:
-        """Calculate the Green function dyad for the pupil function
-
-        Dyad of the green function of the far-field component
-        T. Setälä, M. Kaivola, and A. T. Friberg, "Decomposition of the point-dipole field into homogeneous and evanescent parts," Phys. Rev. E 59, 1200–1206 (1999).
-
-        Returns
-        -------
-        2D ndarray
-            Green function dyad for the pupil function
-        """
-        return np.array(
-            [[1 - self.𝛔[0] ** 2, - self.𝛔[0] * self.𝛔[1], self.𝛔[0] * self.𝛔[2]],
-             [- self.𝛔[0] * self.𝛔[1], 1 - self.𝛔[1] ** 2, self.𝛔[1] * self.𝛔[2]],
-             [self.𝛔[0] * self.𝛔[2], self.𝛔[1] * self.𝛔[2], 1 - self.𝛔[2] ** 2]]
-            )
-
 
 class AberratedPupil3D(Pupil3D):
-    def __init__(self, MODE: str, na_co: float | Tuple,
+    def __init__(self, pupil_type: PupilType, na_co: float | Tuple,
                  ns: Tuple[Tuple], coeff: Tuple[float | Tuple],
                  ca: Tuple[float, float, float] = (0, 0, 0), kc: float = 0,
                  **kwargs):
@@ -219,7 +207,7 @@ class AberratedPupil3D(Pupil3D):
 
         Parameters
         ----------
-        MODE : str
+        pupil_type : PupilType
             Pupil type, can be 'Gauss', 'Hann', 'Bessel', 'circ', or 'rect'
         na_co : float
             Cut-off NA
@@ -242,7 +230,7 @@ class AberratedPupil3D(Pupil3D):
             w : float
                 Width of the Bessel pupil ring (only for 'Bessel' mode)
         """
-        super().__init__(MODE, na_co, **kwargs)
+        super().__init__(pupil_type, na_co, **kwargs)
         self.ns = ns
         self.coeff = coeff
         self.ca = ca
@@ -262,16 +250,16 @@ class AberratedPupil3D(Pupil3D):
 
         Parameters
         ----------
-        σx : 2D ndarray
+        σx : 2D NDArray
             Horizontal pupil coordinate
-        σy : 2D ndarray
+        σy : 2D NDArray
             Vertical pupil coordinate
         k : float
             Wave number
 
         Returns
         -------
-        2D ndarray
+        2D NDArray
             Aberrated 2D pupil function
         """
         self.set_wavefront_error(σx, σy)
@@ -284,18 +272,18 @@ class AberratedPupil3D(Pupil3D):
 
         Parameters
         ----------
-        σx : 2D ndarray
+        σx : 2D NDArray
             Horizontal pupil coordinate
-        σy : 2D ndarray
+        σy : 2D NDArray
             Vertical pupil coordinate
         k : float
             Wave number
-        z : 1D ndarray
+        z : 1D NDArray
             Axial coordinate
 
         Returns
         -------
-        3D ndarray
+        3D NDArray
             h-tilde value for the pupil function
         """
         self.calc_sigma_z(σx, σy, PARAXIAL)
@@ -314,16 +302,16 @@ def circ(σx: NDArray, σy: NDArray, c: float) -> NDArray:
 
     Parameters
     ----------
-    yx : ndarray
+    yx : NDArray
         Horizontal pupil coordinate
-    σy : ndarray
+    σy : NDArray
         Vertical pupil coordinate
     c : float
         Cut-off
 
     Returns
     -------
-    ndarray
+    NDArray
         2D array of the pupil
     """
     r = np.sqrt(σx ** 2 + σy ** 2)
@@ -332,21 +320,21 @@ def circ(σx: NDArray, σy: NDArray, c: float) -> NDArray:
     return out
 
 
-def rect(σx: NDArray, σy: NDArray, c: float | Tuple) -> NDArray:
+def rect(σx: NDArray, σy: NDArray, c: float | Tuple[float]) -> NDArray:
     """Calculate 2D rectangular window
 
     Parameters
     ----------
-    yx : ndarray
+    yx : NDArray
         Horizontal pupil coordinate
-    σy : ndarray
+    σy : NDArray
         Vertical pupil coordinate
     c : float
         Cut-off
 
     Returns
     -------
-    ndarray
+    NDArray
         2D array of the pupil
     """
     r = np.sqrt(σx ** 2 + σy ** 2)
@@ -365,9 +353,9 @@ def gauss_trunc(σx: NDArray, σy: NDArray, w: float | Tuple, c: float | Tuple
 
     Parameters
     ----------
-    σx : ndarray
+    σx : NDArray
         Horizontal pupil coordinate
-    σy : ndarray
+    σy : NDArray
         Vertical pupil coordinate
     w : float or array_like
         Width
@@ -376,7 +364,7 @@ def gauss_trunc(σx: NDArray, σy: NDArray, w: float | Tuple, c: float | Tuple
 
     Returns
     -------
-    ndarray
+    NDArray
         2D array of the pupil
     """
     if np.isscalar(w):
@@ -397,16 +385,16 @@ def Hann_2d_circ(σx: NDArray, σy: NDArray, c: float) -> NDArray:
 
     Parameters
     ----------
-    yx : ndarray
+    yx : NDArray
         Horizontal pupil coordinate
-    σy : ndarray
+    σy : NDArray
         Vertical pupil coordinate
     c : float
         Cut-off
 
     Returns
     -------
-    ndarray
+    NDArray
         2D array of the pupil
     """
     r = np.sqrt(σx ** 2 + σy ** 2)
@@ -420,9 +408,9 @@ def Bessel_beam_pupil(σx: NDArray, σy: NDArray, c: float, w: float) -> NDArray
 
     Parameters
     ----------
-    σx : ndarray
+    σx : NDArray
         Horizontal pupil coordinate
-    σy : ndarray
+    σy : NDArray
         Vertical pupil coordinate
     c : float
         Cut-off
@@ -431,7 +419,7 @@ def Bessel_beam_pupil(σx: NDArray, σy: NDArray, c: float, w: float) -> NDArray
 
     Returns
     -------
-    ndarray
+    NDArray
         2D array of the pupil
     """
     r = np.sqrt(σx ** 2 + σy ** 2)
@@ -449,9 +437,9 @@ def sim_wavefront_error(
 
     Parameters
     ----------
-    σx : ndarray
+    σx : NDArray
         Horizontal pupil coordinate
-    σy : ndarray
+    σy : NDArray
         Vertical pupil coordinate
     c : float
         Cut-off
@@ -463,7 +451,7 @@ def sim_wavefront_error(
 
     Returns
     -------
-    ndarray
+    NDArray
         2D array of the wavefront error
     """
     W = np.zeros_like(σx)

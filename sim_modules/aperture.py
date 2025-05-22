@@ -3,6 +3,21 @@ import scipy as sp
 from typing import Tuple
 from numpy.typing import NDArray
 from .pupils import Pupil3D
+from enum import Enum, auto
+
+
+class IMG_MODE(Enum):
+    """Enum for imaging modes.
+    """
+    PSFD = auto()
+    """Point-scanning Fourier-domain OCT.
+    """
+    LF = auto()
+    """Line-Field OCT.
+    """
+    SCFF = auto()
+    """Spatially-Coherent Full-Field OCT.
+    """
 
 
 class Aperture:
@@ -12,7 +27,7 @@ class Aperture:
 
     def __init__(self,
                  ill: Pupil3D, col: Pupil3D,
-                 IMG_MODE: str,
+                 img_mode: IMG_MODE,
                  FIELD_TYPE: str = 'scalar',
                  ψ: NDArray | float = 1.0
                  ) -> None:
@@ -25,9 +40,8 @@ class Aperture:
             Pupil function for the illumination system.
         col : Pupil3D
             Pupil function for the collection system.
-        IMG_MODE : str
-            Imaging mode, can be one of the following:
-            'PSFD', 'SCFF', 'LF'
+        img_mode : IMG_MODE
+            Enum of the imaging mode.
         FIELD_TYPE : str, optional
             Type of aperture function {'scalar'}, by default 'scalar'.
         ψ : NDArray | float, optional
@@ -35,7 +49,7 @@ class Aperture:
         """
         self.ill = ill
         self.col = col
-        self.IMG_MODE = IMG_MODE
+        self.img_mode = img_mode
         self.FIELD_TYPE = FIELD_TYPE
 
         match self.FIELD_TYPE:
@@ -82,16 +96,16 @@ class Aperture:
         dνx_col = np.abs(ν_para_col[0][0, 1] - ν_para_col[0][0, 0])
         dνy_col = np.abs(ν_para_col[1][1, 0] - ν_para_col[1][0, 0])
 
-        match self.IMG_MODE:
-            case 'PSFD':
+        match self.img_mode:
+            case IMG_MODE.PSFD:
                 dνx = np.abs(ν_para_ill[0][0, 1] - ν_para_ill[0][0, 0])
                 dνy = np.abs(ν_para_ill[1][1, 0] - ν_para_ill[1][0, 0])
                 assert dνx == dνx_col and dνy == dνy_col, "Sampling steps in spatial frequency between illumination and collection must be equal."
-            case 'LF':
+            case IMG_MODE.LF:
                 dνx = np.abs(ν_para_ill[0][0, 1] - ν_para_ill[0][0, 0])
                 assert dνx == dνx_col, "Sampling steps in spatial frequency between illumination and collection must be equal."
                 dνy = dνy_col
-            case 'SCFF':
+            case IMG_MODE.SCFF:
                 dνx = dνx_col
                 dνy = dνy_col
             case _:
@@ -100,7 +114,7 @@ class Aperture:
         self.dνx = dνx
         self.dνy = dνy
 
-        self.calc_ftiles(
+        self.calc_ftildes(
             ν_para_ill, ν_para_col, k, z, PARAXIAL
         )
 
@@ -112,10 +126,10 @@ class Aperture:
 
         return self.htilde
 
-    def calc_ftiles(self, ν_para_ill: Tuple[NDArray, NDArray],
-                    ν_para_col: Tuple[NDArray, NDArray],
-                    k: float, z: NDArray,
-                    PARAXIAL: bool = False):
+    def calc_ftildes(self, ν_para_ill: Tuple[NDArray, NDArray],
+                     ν_para_col: Tuple[NDArray, NDArray],
+                     k: float, z: NDArray,
+                     PARAXIAL: bool = False):
         """
         Calculate the 3D pupil functions for a given set of parameters.
 
@@ -141,8 +155,8 @@ class Aperture:
         f_tilde_col : NDArray
             3D pupil function evaluated at the given coordinates.
         """
-        if self.IMG_MODE == 'SCFF':
-            f_tilde_ill = np.exp(- 1j * k * z[None, None, ...])
+        if self.img_mode == IMG_MODE.SCFF:
+            f_tilde_ill = 1j * np.exp(- 1j * k * z[None, None, ...])
         else:
             f_tilde_ill = self.ill(
                 - (2 * np.pi / k) * ν_para_ill[0],
@@ -189,8 +203,8 @@ class Aperture:
         f_tilde_ill = self.ftilde_ill
         f_tilde_col = self.ftilde_col
 
-        match self.IMG_MODE:
-            case 'PSFD':
+        match self.img_mode:
+            case IMG_MODE.PSFD:
                 f_tilde_ill /= np.sqrt(
                     np.nansum(np.abs(f_tilde_ill[..., idx_z0]) ** 2,
                               axis=(0, 1)) * self.dνx * self.dνy
@@ -198,7 +212,7 @@ class Aperture:
                 ill_amp = np.abs(np.sum(
                     np.nan_to_num(f_tilde_ill[..., idx_z0])
                     ))
-            case 'LF':
+            case IMG_MODE.LF:
                 f_tilde_ill /= np.sqrt(
                     np.nansum(np.abs(f_tilde_ill[..., idx_z0]) ** 2,
                               axis=(1, )) * self.dνx
@@ -206,7 +220,7 @@ class Aperture:
                 ill_amp = np.abs(np.sum(
                     np.nan_to_num(f_tilde_ill[0, ..., idx_z0])
                     ))
-            case 'SCFF':
+            case IMG_MODE.SCFF:
                 ill_amp = np.abs(np.sum(
                     np.nan_to_num(f_tilde_ill[..., idx_z0])
                     ))
@@ -251,12 +265,12 @@ class Aperture:
 
         # Calculate the system transfer function
         # 2D convolution between f_tilde_ill and f_tilde_col.
-        match self.IMG_MODE:
-            case 'SCFF':
+        match self.img_mode:
+            case IMG_MODE.SCFF:
                 h_tilde = np.sum(f_tilde_ill_d[None, ...] * f_tilde_col_d[:, None]
                                  * self.ψ[..., None, None, None],
                                  axis=(0, 1))
-            case 'PSFD':
+            case IMG_MODE.PSFD:
                 h_tilde = np.sum(
                     sp.signal.fftconvolve(
                         f_tilde_ill_d[None, ...],
@@ -267,7 +281,7 @@ class Aperture:
                     * self.ψ[..., None, None, None],
                     axis=(0, 1)
                 )
-            case 'LF':
+            case IMG_MODE.LF:
                 h_tilde = np.sum(
                     sp.signal.fftconvolve(
                         f_tilde_ill_d[None, ...],
