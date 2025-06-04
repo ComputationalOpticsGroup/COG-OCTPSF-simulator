@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 from matplotlib.colors import LightSource, Normalize, LogNorm
 from typing import TypedDict, List
 from .pupils import Pupil3D, AberratedPupil3D
@@ -49,6 +50,9 @@ VERTICAL_FREQ = r"Vertical frequency: {:.3f} µm$^{{-1}}$"
 AXIAL_FREQ = r"Axial frequency: {:.3f} µm$^{{-1}}$"
 
 WAVELENGTH_LEGEND = r"$\lambda$ = {:.3f} µm"
+
+radian_ticks = np.linspace(-np.pi, np.pi, 5)  # Example ticks at -pi, -pi/2, 0, pi/2, pi
+radian_tick_format = mticker.FixedFormatter([r'$-\pi$', r'$-\frac{\pi}{2}$', r'0', r'$\frac{\pi}{2}$', r'$\pi$'])
 
 
 def ctf_unit(ABS_UNIT: bool = False) -> str:
@@ -169,7 +173,7 @@ def plot_psf_xl(psf_dict: PSFDict,
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL)
+    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     ax_phase.set_aspect('equal')
     ax_phase.set_title("phase")
 
@@ -353,7 +357,7 @@ def plot_psf_yl(psf_dict: PSFDict,
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL)
+    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     ax_pha.set_aspect('equal')
     ax_pha.set_title("phase")
 
@@ -540,7 +544,7 @@ def plot_psf_xy(psf_dict: PSFDict,
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL)
+    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     ax_pha.set_aspect('equal')
     ax_pha.set_title("phase")
 
@@ -648,7 +652,8 @@ def plot_psf_xy_reim(psf_dict: PSFDict,
 
 
 def plot_psf_xy_3d(psf_dict: PSFDict,
-                   i=0, num=None, l_i_s=0, show_FWHM=False, ref=None):
+                   i=0, num=None, l_i_s=0, show_FWHM=False, ref=None,
+                   vmin=None, vmax=None):
 
     psf = psf_dict['psf']
     xd = psf_dict['x']
@@ -695,6 +700,7 @@ def plot_psf_xy_3d(psf_dict: PSFDict,
         xd_m[None, :], xd_m[:, None],
         data,
         cmap='viridis',
+        vmin=vmin, vmax=vmax,
     )
     fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
     if show_FWHM:
@@ -1107,7 +1113,7 @@ def plot_ctf_xz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
         cmap='twilight'
     )
     ax_pha.set_aspect('equal')
-    fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL)
+    fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     if νz12 is not None:
         ax_pha.set_xlim(νz12[0], νz12[1])
     ax_pha.set_title("Phase")
@@ -1223,7 +1229,7 @@ def plot_ctf_yz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
         cmap='twilight'
     )
     ax_pha.set_aspect('equal')
-    fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL)
+    fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     if νz12 is not None:
         ax_pha.xlim(νz12[0], νz12[1])
     ax_pha.set_title("Phase")
@@ -1327,7 +1333,7 @@ def plot_ctf_xy_amppha(H: NDArray, νx: NDArray, νy: NDArray,
         cmap='twilight'
     )
     ax_pha.set_aspect('equal')
-    fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL)
+    fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     ax_pha.set_title("Phase")
 
     fig.supxlabel(HORIZONTAL_FREQ_LABEL)
