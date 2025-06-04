@@ -144,10 +144,13 @@ pupil_col = AberratedPupil3D(PupilType.HANN, 0.25, ns, coeff, ca=ca, kc=kbc)
 νpx_num = 257
 # νpx_num = 501
 
-if np.isscalar(pupil_ill.na_co):
-    na_co_ill_max = pupil_ill.na_co
+if img_mode == IMG_MODE.SCFF:
+    na_co_ill_max = 0.0
 else:
-    na_co_ill_max = max(pupil_ill.na_co)
+    if np.isscalar(pupil_ill.na_co):
+        na_co_ill_max = pupil_ill.na_co
+    else:
+        na_co_ill_max = max(pupil_ill.na_co)
 
 if np.isscalar(pupil_col.na_co):
     na_co_col_max = pupil_col.na_co
@@ -166,6 +169,9 @@ dνx = dνy = νpx[0, 1] - νpx[0, 0]
 # %%
 # Spatial frequency coordinates for the illumination pupil
 match img_mode:
+    case IMG_MODE.SCFF:
+        νx_ill = None
+        νy_ill = None
     case IMG_MODE.PSFD:
         νx_ill = νpx
         νy_ill = νpy
@@ -175,8 +181,11 @@ match img_mode:
 
 # %%
 # Pupil coordinates for the central wavelength
-σxc_ill = - 2 * np.pi * νx_ill / kbc
-σyc_ill = - 2 * np.pi * νy_ill / kbc
+if img_mode == IMG_MODE.SCFF:
+    pass
+else:
+    σxc_ill = - 2 * np.pi * νx_ill / kbc
+    σyc_ill = - 2 * np.pi * νy_ill / kbc
 σxc_col = - 2 * np.pi * νpx / kbc
 σyc_col = - 2 * np.pi * νpy / kbc
 
@@ -706,7 +715,7 @@ xd_isam_num = 129
 
 xd_isam = np.linspace(x_isam12[0], x_isam12[1], num=xd_isam_num, endpoint=True)
 
-zw = 10.0
+zw = lw / (2 * nb)
 zd_isam_num = 65
 
 psf_isam = np.zeros((xd_num, xd_num, z.size, zd_isam_num), dtype=np.complex64)

@@ -398,7 +398,7 @@ def Hann_2d_circ(σx: NDArray, σy: NDArray, c: float) -> NDArray:
         2D array of the pupil
     """
     r = np.sqrt(σx ** 2 + σy ** 2)
-    out = np.cos(np.pi * r / (2 * c)) ** 2 / (2 * c)
+    out = np.cos(np.pi * r / (2 * c)) ** 2  # / (2 * c)
     out[σx ** 2 + σy ** 2 > c ** 2] = 0
     return out
 
