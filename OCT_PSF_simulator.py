@@ -11,6 +11,9 @@ from sim_modules.pupils import AberratedPupil3D, PupilType
 from sim_modules.aperture import Aperture, IMG_MODE
 from sim_modules.plottings import (
     plot_axial_psf,
+    plot_x_psfs,
+    plot_y_psfs,
+    plot_z_psfs,
     plot_psf_xl,
     plot_psf_yl,
     plot_psf_xy,
@@ -35,6 +38,11 @@ from sim_modules.plottings import (
 
 # %%
 plt.rcParams['text.usetex'] = True
+
+# %%
+# Transpose PSF plots or not.
+# If True, axial direction is vertical, otherwise horizontal.
+TRANSPOSE = True
 
 # %%
 # Imaging mode
@@ -63,10 +71,6 @@ k_num = 301
 k = np.linspace(
     2 * np.pi / 1.26,
     2 * np.pi / 0.90,
-    # 2 * np.pi / 0.988,
-    # 2 * np.pi / 0.713,
-    # 2 * np.pi / 1.060,
-    # 2 * np.pi / 0.695,
     num=k_num,
     dtype=np.float32
 )  # Wavenumber in air [μm^-1]
@@ -101,7 +105,15 @@ if NORMALIZE:
 plt.figure()
 plt.plot(2 * np.pi / k, s_k)
 plt.title("Spectral density of light source")
-plt.xlabel("Wavelength in air [nm]")
+plt.xlabel("Wavelength in air [µm]")
+plt.ylabel("Spectral density " + "[Hz$^{-1}$]" if NORMALIZE else "[a.u.]")
+plt.show()
+
+# %%
+plt.figure()
+plt.plot(c * k / (2 * np.pi), s_k)
+plt.title("Spectral density of light source")
+plt.xlabel("Frequency [Hz]")
 plt.ylabel("Spectral density " + "[Hz$^{-1}$]" if NORMALIZE else "[a.u.]")
 plt.show()
 
@@ -120,7 +132,15 @@ plt.show()
 
 ns = [(2, 2), (3, 1), (4, 0)]  # Zernike expansion orders
 coeff = [(0.0, 0.0), (0.0, 0.0), 0.0]  # Zernike expansion coefficients (RMS) [µm]
-# coeff = [(0.2, -0.05), (0.04, -0.032), -0.1]  # Zernike expansion coefficients (RMS) [µm]
+
+# %%
+# Calculate RMS wavefront error
+rms = 0
+for cos in coeff:
+    for co in (cos if isinstance(cos, tuple) else (cos,)):
+        rms += co ** 2
+rms = np.sqrt(rms)
+print("RMS wavefront error [µm]: {}".format(rms))
 
 # %%
 # Chromatic aberrations
@@ -134,10 +154,14 @@ ca = (Δx / Δkb, 0, Δz / Δkb)
 if img_mode == IMG_MODE.SCFF:
     na_co_ill = 0.0
     na_w_ill = 0.0
+    pupil_ill = None
 else:
-    pupil_ill = AberratedPupil3D(PupilType.HANN, 0.25, ns, coeff, ca=ca, kc=kbc)
+    pupil_ill = AberratedPupil3D(PupilType.GAUSS, 0.25, ns, coeff, na_w=0.15, ca=ca, kc=kbc)
+    # pupil_ill = AberratedPupil3D(PupilType.HANN, 0.25, ns, coeff, ca=ca, kc=kbc)
+    # pupil_ill = AberratedPupil3D(PupilType.BESSEL, 0.25, ns, coeff, ca=ca, kc=kbc, w=0.01)
 
-pupil_col = AberratedPupil3D(PupilType.HANN, 0.25, ns, coeff, ca=ca, kc=kbc)
+pupil_col = AberratedPupil3D(PupilType.GAUSS, 0.25, ns, coeff, na_w=0.15, ca=ca, kc=kbc)
+# pupil_col = AberratedPupil3D(PupilType.HANN, 0.25, ns, coeff, ca=ca, kc=kbc)
 
 # %%
 # Pupil coordinates
@@ -320,9 +344,10 @@ h_tilde = np.zeros((νy_num, νx_num) + z.shape + k.shape, dtype=np.complex64)
 ill_amp = np.zeros(k.shape, dtype=np.float32)
 col_amp = np.zeros(k.shape, dtype=np.float32)
 
-aperture = Aperture(pupil_ill, pupil_col, img_mode)
-
 h_tilde.nbytes / 1024 ** 2
+
+# %%
+aperture = Aperture(pupil_ill, pupil_col, img_mode)
 
 # %%
 for i, kb_i in enumerate(tqdm(kb)):
@@ -379,10 +404,10 @@ k_offset = k[0] - k_cg
 SF_MODE = 'PSF'
 # SF_MODE = 'LSF'
 
-x12 = [-50.0, 50.0]
+x12 = [-40.0, 40.0]
 xd_num = 129
 
-lw = 30.0 * 2
+lw = 20.0 * 2
 ld_num = 65
 
 psf = np.zeros((xd_num, xd_num, z.size, ld_num), dtype=np.complex64)
@@ -429,42 +454,42 @@ for i in trange(z.size):
         ) * dνy
 
 psf_dict: PSFDict = {
-    'psf': psf, 'x': xd, 'defocus': -z, 'opl': ld,
+    'psf': psf, 'x': xd, 'defocus': -z, 'opl': ld, 'nb': nb,
     'desc': 'Raw', 'MODE': img_mode, 'NORMALIZE': NORMALIZE
 }
 
 # %%
-plot_psfs_xl(psf_dict)
+plot_psfs_xl(psf_dict, TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_psfs_yl(psf_dict)
-
-# %%
-for i in range(z.size):
-    plot_psf_xl(psf_dict, i=i, show_FWHM=False)
+plot_psfs_yl(psf_dict, TRANSPOSE=TRANSPOSE)
 
 # %%
 for i in range(z.size):
-    plot_psf_yl(psf_dict, i=i, show_FWHM=False)
+    plot_psf_xl(psf_dict, i=i, show_FWHM=False, TRANSPOSE=TRANSPOSE, cbar_orientation='horizontal')
+
+# %%
+for i in range(z.size):
+    plot_psf_yl(psf_dict, i=i, show_FWHM=False, TRANSPOSE=TRANSPOSE)
 
 # %%
 for i in range(z.size):
     plot_psf_xy(psf_dict, i=i, num=None, l_i_s=0, show_FWHM=False)
 
 # %%
-plot_psf_xy(psf_dict, i=2, num=None, l_i_s=-0, show_FWHM=False)
+plot_psf_xy(psf_dict, i=1, num=None, l_i_s=-0, show_FWHM=False)
 
 # %%
-plot_psf_xl_reim(psf_dict, i=2)
+plot_psf_xl_reim(psf_dict, i=1, TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_psf_yl_reim(psf_dict, i=2)
+plot_psf_yl_reim(psf_dict, i=1, TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_psf_xy_reim(psf_dict, i=2, num=None, l_i_s=-0)
+plot_psf_xy_reim(psf_dict, i=1, num=None, l_i_s=-0)
 
 # %%
-plot_psf_xy_3d(psf_dict, i=2, num=None, l_i_s=-0, show_FWHM=False)
+plot_psf_xy_3d(psf_dict, i=2, num=None, l_i_s=0, show_FWHM=False, vmin=0.0)
 
 # %%
 plot_axial_psf(psf_dict, NORM=False, log=True)
@@ -592,16 +617,22 @@ refocus_mode = RefocusMode.PSFO
 
 # %%
 # Refocused PSF
-if pupil_ill.pupil_type == PupilType.GAUSS:
-    Df_ill = kbc / (2 * np.pi) * pupil_ill.na_w
+if pupil_ill is not None:
+    if pupil_ill.pupil_type == PupilType.GAUSS:
+        if np.isscalar(pupil_ill.na_w):
+            Df_ill = kbc / (2 * np.pi) * pupil_ill.na_w
+        else:
+            Df_ill = None
+    else:
+        Df_ill = None
 else:
     Df_ill = None
 
-psf_rf = np.zeros_like(psf)
-
-x_rf12 = [-5.0, 5.0]
-y_rf12 = [-5.0, 5.0]
+x_rf12 = [-10.0, 10.0]
+y_rf12 = [-10.0, 10.0]
 xd_rf_num = 129
+
+psf_rf = np.zeros((xd_rf_num, xd_rf_num, z.size, ld_num), dtype=np.complex64)
 
 xd_rf = np.linspace(x_rf12[0], x_rf12[1], num=xd_rf_num, endpoint=True)
 
@@ -623,27 +654,27 @@ for j in trange(z.size, desc="Decodus"):
         ) * dνy
 
 psf_rf_dict: PSFDict = {
-    'psf': psf_rf, 'x': xd_rf, 'defocus': -z, 'opl': ld,
+    'psf': psf_rf, 'x': xd_rf, 'defocus': -z, 'opl': ld, 'nb': nb,
     'desc': 'Refocused ({})'.format(refocus_mode.name), 'MODE': img_mode,
     'NORMALIZE': NORMALIZE
 }
 
 # %%
-plot_psfs_xl(psf_rf_dict)
+plot_psfs_xl(psf_rf_dict, TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_psfs_yl(psf_rf_dict)
+plot_psfs_yl(psf_rf_dict, TRANSPOSE=TRANSPOSE)
 
 # %%
 plot_axial_psf(psf_rf_dict, NORM=False, log=True)
 
 # %%
 for i in range(z.size):
-    plot_psf_xl(psf_rf_dict, i=i, show_FWHM=False)
+    plot_psf_xl(psf_rf_dict, i=i, show_FWHM=False, TRANSPOSE=TRANSPOSE, cbar_orientation='horizontal')
 
 # %%
 for i in range(z.size):
-    plot_psf_yl(psf_rf_dict, i=i, show_FWHM=False)
+    plot_psf_yl(psf_rf_dict, i=i, show_FWHM=False, TRANSPOSE=TRANSPOSE, cbar_orientation='horizontal')
 
 # %%
 for i in range(z.size):
@@ -709,8 +740,8 @@ plt.show()
 # %%
 # ISAM PSF
 
-x_isam12 = [-5.0, 5.0]
-y_isam12 = [-5.0, 5.0]
+x_isam12 = [-10.0, 10.0]
+y_isam12 = [-10.0, 10.0]
 xd_isam_num = 129
 
 xd_isam = np.linspace(x_isam12[0], x_isam12[1], num=xd_isam_num, endpoint=True)
@@ -718,7 +749,7 @@ xd_isam = np.linspace(x_isam12[0], x_isam12[1], num=xd_isam_num, endpoint=True)
 zw = lw / (2 * nb)
 zd_isam_num = 65
 
-psf_isam = np.zeros((xd_num, xd_num, z.size, zd_isam_num), dtype=np.complex64)
+psf_isam = np.zeros((xd_isam_num, xd_isam_num, z.size, zd_isam_num), dtype=np.complex64)
 zd_isam = np.zeros((zd_isam_num, z.size), dtype=np.float32)
 
 for i in trange(z.size):
@@ -750,28 +781,28 @@ psf_isam_dict: PSFDict = {
 }
 
 # %%
-plot_psfs_xl(psf_isam_dict)
+plot_psfs_xl(psf_isam_dict, TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_psfs_yl(psf_isam_dict)
+plot_psfs_yl(psf_isam_dict, TRANSPOSE=TRANSPOSE)
 
 # %%
 plot_axial_psf(psf_isam_dict, i=None, NORM=False, log=True)
 
 # %%
 for i in range(z.size):
-    plot_psf_xl(psf_isam_dict, i=i, show_FWHM=False)
+    plot_psf_xl(psf_isam_dict, i=i, show_FWHM=False, TRANSPOSE=TRANSPOSE, cbar_orientation='horizontal')
 
 # %%
 for i in range(z.size):
-    plot_psf_yl(psf_isam_dict, i=i, show_FWHM=False)
+    plot_psf_yl(psf_isam_dict, i=i, show_FWHM=False, TRANSPOSE=TRANSPOSE)
 
 # %%
 for i in range(z.size):
     plot_psf_xy(psf_isam_dict, i=i, num=None, l_i_s=0, show_FWHM=False)
 
 # %%
-plot_psf_xy_3d(psf_isam_dict, i=1, num=None, l_i_s=0, show_FWHM=False)
+plot_psf_xy_3d(psf_isam_dict, i=1, num=None, l_i_s=0, show_FWHM=False, vmin=0, vmax=None)
 
 # %%
 plot_psfs_power(psf_isam_dict)

@@ -31,7 +31,9 @@ from sim_modules.plottings import (
     plot_ctf_xy_reim,
     plot_ctf_xy_amppha,
     psf_unit,
-    ctf_unit
+    ctf_unit,
+    swap,
+    swap_supaxes,
 )
 
 
@@ -62,6 +64,11 @@ def center_of_range(input: NDArray, axis: int) -> NDArray:
 plt.rcParams['text.usetex'] = True
 
 # %%
+# Transpose PSF plots or not.
+# If True, axial direction is vertical, otherwise horizontal.
+TRANSPOSE = False
+
+# %%
 # Imaging mode
 img_mode = IMG_MODE.PSFD
 # img_mode = IMG_MODE.LF
@@ -69,8 +76,8 @@ img_mode = IMG_MODE.PSFD
 
 # %%
 # Refractive index of the surrounding medium
-nb = 1.0  # Refractive index of air
-# nb = 1.34  # Refractive index of tissue
+# nb = 1.0  # Refractive index of air
+nb = 1.34  # Refractive index of tissue
 
 # %%
 # Select simulation mode
@@ -80,7 +87,7 @@ SIM_MODE = 'CTF_zoom'  # Calculate the coherent transfer function with zoom FFT
 
 # %%
 # Flag normalization of pupils
-NORMALIZE = False
+NORMALIZE = True
 
 # %%
 # Flag imaging mode
@@ -116,8 +123,16 @@ print("Central wavelength [um]: {}".format(2 * np.pi / kc))
 # In the case of the different optical path, the wavefront aberration should be defined separately.
 
 ns = [(2, 2), (3, 1), (4, 0)]  # Zernike expansion orders
-coeff = [(0.0, 0.0), (0.0, 0.0), 0.0]  # Zernike expansion coefficients (RMS) [µm]
-# coeff = [(0.2, -0.05), (0.04, -0.032), -0.1]  # Zernike expansion coefficients (RMS) [µm]
+coeff = [(0.2, -0.05), (0.04, -0.032), -0.1]  # Zernike expansion coefficients (RMS) [µm]
+
+# %%
+# Calculate RMS wavefront error
+rms = 0
+for cos in coeff:
+    for co in (cos if isinstance(cos, tuple) else (cos,)):
+        rms += co ** 2
+rms = np.sqrt(rms)
+print("RMS wavefront error [µm]: {}".format(rms))
 
 # %%
 # Chromatic aberrations
@@ -500,16 +515,20 @@ else:
 print(λ[ki])
 
 # %%
-plot_ctf_xz_amppha(H, νx, νy, νz, νy_num // 2, λ[ki], NORMALIZE, img_mode, νz12, Hmax=None)
+plot_ctf_xz_amppha(H, νx, νy, νz, νy_num // 2, λ[ki], NORMALIZE, img_mode, νz12, Hmax=None,
+                   TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_ctf_xz_reim(H, νx, νy, νz, νy_num // 2, λ[ki], NORMALIZE, img_mode, νz12, Hmax=None)
+plot_ctf_xz_reim(H, νx, νy, νz, νy_num // 2, λ[ki], NORMALIZE, img_mode, νz12, Hmax=None,
+                 TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_ctf_yz_amppha(H, νx, νy, νz, νx_num // 2, λ[ki], NORMALIZE, img_mode, Hmax=None)
+plot_ctf_yz_amppha(H, νx, νy, νz, νx_num // 2, λ[ki], NORMALIZE, img_mode, Hmax=None,
+                   TRANSPOSE=TRANSPOSE)
 
 # %%
-plot_ctf_yz_reim(H, νx, νy, νz, νx_num // 2, λ[ki], NORMALIZE, img_mode, νz12, Hmax=None)
+plot_ctf_yz_reim(H, νx, νy, νz, νx_num // 2, λ[ki], NORMALIZE, img_mode, νz12, Hmax=None,
+                 TRANSPOSE=TRANSPOSE)
 
 # %%
 plt.figure()
@@ -627,23 +646,37 @@ plt.show()
 # %%
 # XZ plot
 
-fig, (ax_amp, ax_pha) = plt.subplots(2, 1, sharex='all', sharey='all', layout='compressed')
+fig, (ax_amp, ax_pha) = plt.subplots(
+    *swap(2, 1, TRANSPOSE),
+    sharex='all', sharey='all', layout='compressed'
+)
 
 pcm_amp = ax_amp.pcolormesh(
-    np.sort(z), xd,
-    np.abs(np.take_along_axis(ht[xd_num // 2], np.argsort(z)[None, :], axis=-1)),
+    *swap(np.sort(z), xd, TRANSPOSE),
+    np.abs(
+        np.transpose(
+            np.take_along_axis(
+                ht[xd_num // 2],
+                np.argsort(z)[None, :], axis=-1
+            ),
+            (1, 0) if TRANSPOSE else (0, 1)
+        ),
+    )
 )
 fig.colorbar(pcm_amp, label=PSF_AMP_LABEL + psf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
 ax_amp.set_aspect('equal')
 ax_amp.set_title("Amplitude")
 
 pcm_pha = ax_pha.pcolormesh(
-    np.sort(z), xd,
+    *swap(np.sort(z), xd, TRANSPOSE),
     np.angle(
-        np.take_along_axis(
-            ht[xd_num // 2] * a[None, :, ki] * b[None, :, ki],
-            np.argsort(z)[None, :],
-            axis=-1
+        np.transpose(
+            np.take_along_axis(
+                ht[xd_num // 2] * a[None, :, ki] * b[None, :, ki],
+                np.argsort(z)[None, :],
+                axis=-1
+            ),
+            (1, 0) if TRANSPOSE else (0, 1)
         )
     ),
     cmap='twilight', vmin=-np.pi, vmax=np.pi
@@ -658,29 +691,42 @@ fig.suptitle(
     ("X-slice PSF\n" +
      WAVELENGTH + ", " + LOCATION_Y).format(λ[ki], xd[xd_num // 2])
 )
+if TRANSPOSE:
+    swap_supaxes(fig)
 
 plt.show()
 
 # %%
 # YZ plot
 
-fig, (ax_amp, ax_pha) = plt.subplots(2, 1, sharex='all', sharey='all', layout='compressed')
+fig, (ax_amp, ax_pha) = plt.subplots(
+    *swap(2, 1, TRANSPOSE),
+    sharex='all', sharey='all', layout='compressed'
+)
 
 pcm_amp = ax_amp.pcolormesh(
-    np.sort(z), xd,
-    np.abs(np.take_along_axis(ht[:, xd_num // 2], np.argsort(z)[None, :], axis=-1)),
+    *swap(np.sort(z), xd, TRANSPOSE),
+    np.abs(
+        np.transpose(
+            np.take_along_axis(ht[:, xd_num // 2], np.argsort(z)[None, :], axis=-1),
+            (1, 0) if TRANSPOSE else (0, 1)
+        ),
+    ),
 )
 fig.colorbar(pcm_amp, label=PSF_AMP_LABEL + psf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
 ax_amp.set_aspect('equal')
 ax_amp.set_title("Amplitude")
 
 pcm_pha = ax_pha.pcolormesh(
-    np.sort(z), xd,
+    *swap(np.sort(z), xd, TRANSPOSE),
     np.angle(
-        np.take_along_axis(
-            ht[:, xd_num // 2] * a[None, :, ki] * b[None, :, ki],
-            np.argsort(z)[None, :],
-            axis=-1
+        np.transpose(
+            np.take_along_axis(
+                ht[:, xd_num // 2] * a[None, :, ki] * b[None, :, ki],
+                np.argsort(z)[None, :],
+                axis=-1
+            ),
+            (1, 0) if TRANSPOSE else (0, 1)
         )
     ),
     cmap='twilight', vmin=-np.pi, vmax=np.pi
@@ -695,6 +741,8 @@ fig.suptitle(
     ("Y-slice PSF\n" +
      WAVELENGTH + ", " + LOCATION_X).format(λ[ki], xd[xd_num // 2])
 )
+if TRANSPOSE:
+    swap_supaxes(fig)
 
 plt.show()
 

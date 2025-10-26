@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.colors import LightSource, Normalize, LogNorm
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from typing import TypedDict, List
 from .pupils import Pupil3D, AberratedPupil3D
 from .aperture import IMG_MODE
@@ -14,6 +16,7 @@ HORIZONTAL_FREQ_LABEL = r"Horizontal spatial frequency $\nu_x$ [µm$^{-1}$]"
 VERTICAL_FREQ_LABEL = r"Vertical spatial frequency $\nu_y$ [µm$^{-1}$]"
 
 OPL_LABEL = r"Single-trip OPL $l$ [µm]"
+DEPTH_LABEL = r"Depth $l/n_\mathrm{BG}$ [µm]"
 RECONST_AXIAL_LABEL = r"Reconstructed depth $z_\mathrm{re}$ [µm]"
 HORIZONTAL_LABEL = r"Horizontal $x_0$ [µm]"
 VERTICAL_LABEL = r"Vertical $y_0$ [µm]"
@@ -37,12 +40,13 @@ OCT_PSF_IMAG_LABEL = r"OCT's PSF imaginary part Im[$h_\mathrm{OCT}$] "
 
 DEFOCUS = r"Defocus: {} µm"
 
-LOCATION_XY = r"($x_0$, $y_0$) = ({} µm, {} µm)"
-LOCATION_X = r"$x_0$ = {} µm"
-LOCATION_Y = r"$y_0$ = {} µm"
-LOCATION_OPL = r"$l$ = {} µm"
-LOCATION_ZRE = r"$z_\mathrm{{re}}$ = {} µm"
-LOCATION_Z = r"$z_0$ = {} µm"
+LOCATION_XY = r"($x_0$, $y_0$) = ({:.3f} µm, {:.3f} µm)"
+LOCATION_X = r"$x_0$ = {:.3f} µm"
+LOCATION_Y = r"$y_0$ = {:.3f} µm"
+LOCATION_OPL = r"$l$ = {:.3f} µm"
+LOCATION_DEPTH = r"$l/n_\mathrm{{BG}}$ = {:.3f} µm"
+LOCATION_ZRE = r"$z_\mathrm{{re}}$ = {:.3f} µm"
+LOCATION_Z = r"$z_0$ = {:.3f} µm"
 
 WAVELENGTH = r"Wavelength: {:.3f} µm"
 HORIZONTAL_FREQ = r"Horizontal frequency: {:.3f} µm$^{{-1}}$"
@@ -99,11 +103,14 @@ class PSFDictRequired(TypedDict):
 class PSFDict(PSFDictRequired, total=False):
     opl: NDArray
     z: NDArray
+    nb: float
 
 
 def plot_psf_xl(psf_dict: PSFDict,
                 i=0, num=None, show_FWHM=True,
-                log=False, y_i: int | None = None):
+                log=False, y_i: int | None = None,
+                TRANSPOSE: bool = False,
+                cbar_orientation='vertical'):
 
     psf = psf_dict['psf']
     xd = psf_dict['x']
@@ -111,6 +118,12 @@ def plot_psf_xl(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -143,23 +156,27 @@ def plot_psf_xl(psf_dict: PSFDict,
     xd_m = xd[xd_r]
 
     fig, (ax, ax_phase) = plt.subplots(
-        1, 2,
+        *swap(1, 2, TRANSPOSE),
         layout='compressed',
         sharex=True, sharey=True
     )
 
     pcm = ax.pcolormesh(
-        ld_m,
-        xd_m,
-        amp,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        amp.T if TRANSPOSE else amp,
         norm=LogNorm() if log else None,
     )
-    fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(
+        pcm,
+        label=OCT_PSF_AMP_LABEL + oct_psf_unit(
+            ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+        ),
+        orientation=cbar_orientation,
+    )
     if show_FWHM:
         ax.contour(
-            ld_m,
-            xd_m,
-            amp,
+            *swap(ld_m, xd_m, TRANSPOSE),
+            amp.T if TRANSPOSE else amp,
             [np.max(amp) / 2],
             colors=['red']
         )
@@ -167,13 +184,18 @@ def plot_psf_xl(psf_dict: PSFDict,
     ax.set_title("amplitude")
 
     pcm2 = ax_phase.pcolormesh(
-        ld_m,
-        xd_m,
-        pha,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        pha.T if TRANSPOSE else pha,
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
+    fig.colorbar(
+        pcm2,
+        label=OCT_PSF_PHASE_LABEL,
+        ticks=radian_ticks,
+        format=radian_tick_format,
+        orientation=cbar_orientation,
+    )
     ax_phase.set_aspect('equal')
     ax_phase.set_title("phase")
 
@@ -185,8 +207,13 @@ def plot_psf_xl(psf_dict: PSFDict,
     if ZR:
         fig.supxlabel(RECONST_AXIAL_LABEL)
     else:
-        fig.supxlabel(OPL_LABEL)
+        if NBG:
+            fig.supxlabel(DEPTH_LABEL)
+        else:
+            fig.supxlabel(OPL_LABEL)
     fig.supylabel(HORIZONTAL_LABEL)
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -197,7 +224,9 @@ def plot_psf_xl(psf_dict: PSFDict,
 
 def plot_psf_xl_reim(psf_dict: PSFDict,
                      i=0, num=None, y_i: int | None = None,
-                     hmax: float | None = None):
+                     hmax: float | None = None,
+                     TRANSPOSE: bool = False,
+                     cbar_orientation='vertical'):
 
     psf = psf_dict['psf']
     xd = psf_dict['x']
@@ -205,6 +234,12 @@ def plot_psf_xl_reim(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -246,24 +281,34 @@ def plot_psf_xl_reim(psf_dict: PSFDict,
     )
 
     pcm = ax_re.pcolormesh(
-        ld_m,
-        xd_m,
-        re,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        re.T if TRANSPOSE else re,
         vmin=-hmax, vmax=hmax,
         cmap='PiYG'
     )
-    fig.colorbar(pcm, label=OCT_PSF_REAL_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(
+        pcm,
+        label=OCT_PSF_REAL_LABEL + oct_psf_unit(
+            ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+        ),
+        orientation=cbar_orientation,
+    )
     ax_re.set_aspect('equal')
     ax_re.set_title("real")
 
     pcm2 = ax_im.pcolormesh(
-        ld_m,
-        xd_m,
-        im,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        im.T if TRANSPOSE else im,
         vmin=-hmax, vmax=hmax,
         cmap='PiYG'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_IMAG_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(
+        pcm2,
+        label=OCT_PSF_IMAG_LABEL + oct_psf_unit(
+            ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+        ),
+        orientation=cbar_orientation,
+    )
     ax_im.set_aspect('equal')
     ax_im.set_title("imaginary")
 
@@ -275,8 +320,13 @@ def plot_psf_xl_reim(psf_dict: PSFDict,
     if ZR:
         fig.supxlabel(RECONST_AXIAL_LABEL)
     else:
-        fig.supxlabel(OPL_LABEL)
+        if NBG:
+            fig.supxlabel(DEPTH_LABEL)
+        else:
+            fig.supxlabel(OPL_LABEL)
     fig.supylabel(HORIZONTAL_LABEL)
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -287,7 +337,9 @@ def plot_psf_xl_reim(psf_dict: PSFDict,
 
 def plot_psf_yl(psf_dict: PSFDict,
                 i=0, num=None, show_FWHM=True,
-                log=False, x_i: int | None = None):
+                log=False, x_i: int | None = None,
+                TRANSPOSE: bool = False,
+                cbar_orientation='vertical'):
 
     psf = psf_dict['psf']
     xd = psf_dict['x']
@@ -295,6 +347,12 @@ def plot_psf_yl(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -327,23 +385,27 @@ def plot_psf_yl(psf_dict: PSFDict,
     xd_m = xd[xd_r]
 
     fig, (ax, ax_pha) = plt.subplots(
-        1, 2,
+        *swap(1, 2, TRANSPOSE),
         layout='compressed',
         sharex=True, sharey=True
     )
 
     pcm = ax.pcolormesh(
-        ld_m,
-        xd_m,
-        amp,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        amp.T if TRANSPOSE else amp,
         norm=LogNorm() if log else None,
     )
-    fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(
+        pcm,
+        label=OCT_PSF_AMP_LABEL + oct_psf_unit(
+            ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+        ),
+        orientation=cbar_orientation,
+    )
     if show_FWHM:
         ax.contour(
-            ld_m,
-            xd_m,
-            amp,
+            *swap(ld_m, xd_m, TRANSPOSE),
+            amp.T if TRANSPOSE else amp,
             [np.max(amp) / 2],
             colors=['red']
         )
@@ -351,13 +413,18 @@ def plot_psf_yl(psf_dict: PSFDict,
     ax.set_title("amplitude")
 
     pcm2 = ax_pha.pcolormesh(
-        ld_m,
-        xd_m,
-        pha,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        pha.T if TRANSPOSE else pha,
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
+    fig.colorbar(
+        pcm2,
+        label=OCT_PSF_PHASE_LABEL,
+        ticks=radian_ticks,
+        format=radian_tick_format,
+        orientation=cbar_orientation,
+    )
     ax_pha.set_aspect('equal')
     ax_pha.set_title("phase")
 
@@ -369,8 +436,13 @@ def plot_psf_yl(psf_dict: PSFDict,
     if ZR:
         fig.supxlabel(RECONST_AXIAL_LABEL)
     else:
-        fig.supxlabel(OPL_LABEL)
+        if NBG:
+            fig.supxlabel(DEPTH_LABEL)
+        else:
+            fig.supxlabel(OPL_LABEL)
     fig.supylabel(VERTICAL_LABEL)
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -381,7 +453,8 @@ def plot_psf_yl(psf_dict: PSFDict,
 
 def plot_psf_yl_reim(psf_dict: PSFDict,
                      i=0, num=None, x_i: int | None = None,
-                     hmax: float | None = None):
+                     hmax: float | None = None,
+                     TRANSPOSE: bool = False):
 
     psf = psf_dict['psf']
     xd = psf_dict['x']
@@ -389,6 +462,12 @@ def plot_psf_yl_reim(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -430,24 +509,26 @@ def plot_psf_yl_reim(psf_dict: PSFDict,
     )
 
     pcm = ax_re.pcolormesh(
-        ld_m,
-        xd_m,
-        re,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        re.T if TRANSPOSE else re,
         vmin=-hmax, vmax=hmax,
         cmap='PiYG'
     )
-    fig.colorbar(pcm, label=OCT_PSF_REAL_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(pcm, label=OCT_PSF_REAL_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     ax_re.set_aspect('equal')
     ax_re.set_title("real")
 
     pcm2 = ax_im.pcolormesh(
-        ld_m,
-        xd_m,
-        im,
+        *swap(ld_m, xd_m, TRANSPOSE),
+        im.T if TRANSPOSE else im,
         vmin=-hmax, vmax=hmax,
         cmap='PiYG'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_IMAG_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(pcm2, label=OCT_PSF_IMAG_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     ax_im.set_aspect('equal')
     ax_im.set_title("imaginary")
 
@@ -459,8 +540,13 @@ def plot_psf_yl_reim(psf_dict: PSFDict,
     if ZR:
         fig.supxlabel(RECONST_AXIAL_LABEL)
     else:
-        fig.supxlabel(OPL_LABEL)
+        if NBG:
+            fig.supxlabel(DEPTH_LABEL)
+        else:
+            fig.supxlabel(OPL_LABEL)
     fig.supylabel(VERTICAL_LABEL)
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -479,6 +565,12 @@ def plot_psf_xy(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -527,7 +619,9 @@ def plot_psf_xy(psf_dict: PSFDict,
         amp,
         norm=LogNorm() if log else None
     )
-    fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     if show_FWHM:
         ax.contour(
             xd_m, xd_m,
@@ -551,7 +645,7 @@ def plot_psf_xy(psf_dict: PSFDict,
     fig.suptitle(
         ("{}-OCT en-face {} PSF.\n" +
          DEFOCUS + ", " +
-         (LOCATION_ZRE if ZR else LOCATION_OPL)
+         (LOCATION_ZRE if ZR else (LOCATION_OPL if not NBG else LOCATION_DEPTH))
          # "\nMax at: ({}, {}) µm."
          ).format(
              MODE.name, desc, d[i],
@@ -576,6 +670,12 @@ def plot_psf_xy_reim(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -620,7 +720,9 @@ def plot_psf_xy_reim(psf_dict: PSFDict,
         vmin=-hmax, vmax=hmax,
         cmap='PiYG'
     )
-    fig.colorbar(pcm, label=OCT_PSF_REAL_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(pcm, label=OCT_PSF_REAL_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     ax_re.set_aspect('equal')
     ax_re.set_title("real")
 
@@ -630,14 +732,16 @@ def plot_psf_xy_reim(psf_dict: PSFDict,
         vmin=-hmax, vmax=hmax,
         cmap='PiYG'
     )
-    fig.colorbar(pcm2, label=OCT_PSF_IMAG_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(pcm2, label=OCT_PSF_IMAG_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     ax_im.set_aspect('equal')
     ax_im.set_title("imaginary")
 
     fig.suptitle(
         ("{}-OCT en-face {} PSF.\n" +
          DEFOCUS + ", " +
-         (LOCATION_ZRE if ZR else LOCATION_OPL)
+         (LOCATION_ZRE if ZR else (LOCATION_OPL if not NBG else LOCATION_DEPTH))
          # "\nMax at: ({}, {}) µm."
          ).format(
              MODE.name, desc, d[i],
@@ -661,6 +765,12 @@ def plot_psf_xy_3d(psf_dict: PSFDict,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -702,7 +812,9 @@ def plot_psf_xy_3d(psf_dict: PSFDict,
         cmap='viridis',
         vmin=vmin, vmax=vmax,
     )
-    fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     if show_FWHM:
         ax.contour(
             xd_m, xd_m,
@@ -712,7 +824,7 @@ def plot_psf_xy_3d(psf_dict: PSFDict,
         )
     ax.set_title(("{}-OCT en-face {} PSF.\n" +
                   DEFOCUS + ", " +
-                  (LOCATION_ZRE if ZR else LOCATION_OPL)
+                  (LOCATION_ZRE if ZR else (LOCATION_OPL if not NBG else LOCATION_DEPTH))
                  # "\nMax at: ({}, {}) µm."
                  ).format(
                     MODE.name, desc, d[i],
@@ -734,6 +846,12 @@ def plot_axial_psf(psf_dict: PSFDict, i=None, NORM=True,
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -802,24 +920,349 @@ def plot_axial_psf(psf_dict: PSFDict, i=None, NORM=True,
 
         fig.suptitle("{}-OCT {} axial PSFs.\n".format(MODE.name, desc) + LOCATION)
 
-    ax.set_ylabel("Normalized amplitude [a.u.]" if NORM else OCT_PSF_AMP_LABEL + oct_psf_unit(NORMALIZE and MODE == IMG_MODE.PSFD))
+    ax.set_ylabel("Normalized amplitude [a.u.]" if NORM else OCT_PSF_AMP_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
     ax_pha.set_ylabel(OCT_PSF_PHASE_LABEL)
 
     if ZR:
         fig.supxlabel(RECONST_AXIAL_LABEL)
     else:
-        fig.supxlabel(OPL_LABEL)
+        if NBG:
+            fig.supxlabel(DEPTH_LABEL)
+        else:
+            fig.supxlabel(OPL_LABEL)
 
     plt.show()
 
 
-def plot_psfs_xl(psf_dict: PSFDict, y_i: int | None = None):
+def plot_x_psfs(list_psf_dict: List[PSFDict], i: int = 0, NORM=True,
+                y_i: int | None = None, z_i: int | None = None,
+                log: bool = False, phase: bool = False, AT_MAX: bool = False,
+                CENTER: bool = False):
+
+    fig, axes = plt.subplots(
+        2 if phase else 1, 1,
+        layout='compressed',
+        sharex=True
+    )
+
+    if phase:
+        ax, ax_pha = axes
+    else:
+        ax = axes
+
+    ax.set_title("Amplitude")
+    if phase:
+        ax_pha.set_title("Phase")
+
+    if log:
+        ax.set_yscale('log')
+
+    for psf_dict in list_psf_dict:
+        psf = psf_dict['psf']
+        xd = psf_dict['x']
+        d = psf_dict['defocus']
+        try:
+            ld = psf_dict['opl']
+            ZR = False
+            try:
+                nb = psf_dict['nb']
+                ld = ld / nb
+                NBG = True
+            except KeyError:
+                NBG = False
+        except KeyError:
+            ld = psf_dict['z']
+            ZR = True
+        xd_num = xd.size
+        ld_num = ld.shape[0]
+        if AT_MAX:
+            arg = np.unravel_index(
+                np.abs(psf[..., i, :]).argmax(),
+                psf[..., i, :].shape
+            )
+            y_i, x_i, z_i = arg[0], arg[1], arg[2]
+        else:
+            if y_i is None:
+                y_i = xd_num // 2
+            if z_i is None:
+                z_i = ld_num // 2
+
+        desc = psf_dict['desc']
+        MODE = psf_dict['MODE']
+        NORMALIZE = psf_dict['NORMALIZE']
+
+        x = xd
+        y = psf[
+            y_i,
+            :,
+            i,
+            z_i
+        ]
+
+        LOCATION = LOCATION_Y.format(
+            xd[y_i]
+        ) + ", " + (
+            LOCATION_ZRE if ZR else (
+                LOCATION_OPL if not NBG else LOCATION_DEPTH
+            )
+        ).format(ld[z_i, i])
+
+        amp = np.abs(y)
+        ang = np.angle(y)
+        if CENTER:
+            if AT_MAX:
+                shift_x = xd_num // 2 - x_i
+                amp = np.roll(amp, shift_x)
+                ang = np.roll(ang, shift_x)
+
+        ax.plot(x, amp / np.max(amp) if NORM else amp,
+                label="{}-OCT {}\n".format(MODE.name, desc) + LOCATION)
+        if phase:
+            ax_pha.plot(x, ang,
+                        label="{}-OCT {}\n".format(MODE.name, desc) + LOCATION)
+
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.axvline(x=0, color='k', linestyle='--')
+    if phase:
+        ax_pha.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    fig.suptitle(("Horizontal PSF\n" + DEFOCUS).format(d[i]))
+
+    ax.set_ylabel("Normalized amplitude [a.u.]" if NORM else OCT_PSF_AMP_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
+    if phase:
+        ax_pha.set_ylabel(OCT_PSF_PHASE_LABEL)
+
+    fig.supxlabel(HORIZONTAL_LABEL)
+
+    plt.show()
+
+
+def plot_y_psfs(list_psf_dict: List[PSFDict], i: int = 0, NORM=True,
+                x_i: int | None = None, z_i: int | None = None,
+                log: bool = False, phase: bool = False, AT_MAX: bool = False,
+                CENTER: bool = False):
+
+    fig, axes = plt.subplots(
+        2 if phase else 1, 1,
+        layout='compressed',
+        sharex=True
+    )
+
+    if phase:
+        ax, ax_pha = axes
+    else:
+        ax = axes
+
+    ax.set_title("Amplitude")
+    if phase:
+        ax_pha.set_title("Phase")
+
+    if log:
+        ax.set_yscale('log')
+
+    for psf_dict in list_psf_dict:
+        psf = psf_dict['psf']
+        xd = psf_dict['x']
+        d = psf_dict['defocus']
+        try:
+            ld = psf_dict['opl']
+            ZR = False
+            try:
+                nb = psf_dict['nb']
+                ld = ld / nb
+                NBG = True
+            except KeyError:
+                NBG = False
+        except KeyError:
+            ld = psf_dict['z']
+            ZR = True
+        xd_num = xd.size
+        ld_num = ld.shape[0]
+        if AT_MAX:
+            arg = np.unravel_index(
+                np.abs(psf[..., i, :]).argmax(),
+                psf[..., i, :].shape
+            )
+            y_i, x_i, z_i = arg[0], arg[1], arg[2]
+        else:
+            if x_i is None:
+                x_i = xd_num // 2
+            if z_i is None:
+                z_i = ld_num // 2
+
+        desc = psf_dict['desc']
+        MODE = psf_dict['MODE']
+        NORMALIZE = psf_dict['NORMALIZE']
+
+        x = xd
+        y = psf[
+            :,
+            x_i,
+            i,
+            z_i
+        ]
+
+        LOCATION = LOCATION_X.format(
+            xd[x_i]
+        ) + ", " + (
+            LOCATION_ZRE if ZR else (
+                LOCATION_OPL if not NBG else LOCATION_DEPTH
+            )
+        ).format(ld[z_i, i])
+
+        amp = np.abs(y)
+        ang = np.angle(y)
+
+        if CENTER:
+            if AT_MAX:
+                shift_y = xd_num // 2 - y_i
+                amp = np.roll(amp, shift_y)
+                ang = np.roll(ang, shift_y)
+
+        ax.plot(x, amp / np.max(amp) if NORM else amp,
+                label="{}-OCT {}\n".format(MODE.name, desc) + LOCATION)
+        if phase:
+            ax_pha.plot(x, ang,
+                        label="{}-OCT {}\n".format(MODE.name, desc) + LOCATION)
+
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.axvline(x=0, color='k', linestyle='--')
+    if phase:
+        ax_pha.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    fig.suptitle(("Vertical PSF\n" + DEFOCUS).format(d[i]))
+
+    ax.set_ylabel("Normalized amplitude [a.u.]" if NORM else OCT_PSF_AMP_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
+    if phase:
+        ax_pha.set_ylabel(OCT_PSF_PHASE_LABEL)
+
+    fig.supxlabel(VERTICAL_LABEL)
+
+    plt.show()
+
+
+def plot_z_psfs(list_psf_dict: List[PSFDict], i: int = 0, NORM=True,
+                x_i: int | None = None, y_i: int | None = None,
+                log: bool = False, phase: bool = False, AT_MAX: bool = False):
+
+    fig, axes = plt.subplots(
+        2 if phase else 1, 1,
+        layout='compressed',
+        sharex=True
+    )
+
+    if phase:
+        ax, ax_pha = axes
+    else:
+        ax = axes
+
+    ax.set_title("Amplitude")
+    if phase:
+        ax_pha.set_title("Phase")
+
+    if log:
+        ax.set_yscale('log')
+
+    for psf_dict in list_psf_dict:
+        psf = psf_dict['psf']
+        xd = psf_dict['x']
+        d = psf_dict['defocus']
+        try:
+            ld = psf_dict['opl']
+            ZR = False
+            try:
+                nb = psf_dict['nb']
+                ld = ld / nb
+                NBG = True
+            except KeyError:
+                NBG = False
+        except KeyError:
+            ld = psf_dict['z']
+            ZR = True
+        xd_num = xd.size
+        ld_num = ld.shape[0]
+        if AT_MAX:
+            arg = np.unravel_index(
+                np.abs(psf[..., i, :]).argmax(),
+                psf[..., i, :].shape
+            )
+            x_i, y_i = arg[1], arg[0]
+        else:
+            if x_i is None:
+                x_i = xd_num // 2
+            if y_i is None:
+                y_i = xd_num // 2
+
+        desc = psf_dict['desc']
+        MODE = psf_dict['MODE']
+        NORMALIZE = psf_dict['NORMALIZE']
+
+        x = ld[:, i]
+        y = psf[
+            y_i,
+            x_i,
+            i,
+            :
+        ]
+
+        LOCATION = LOCATION_XY.format(
+            xd[x_i], xd[y_i]
+        )
+
+        amp = np.abs(y)
+        ang = np.angle(y)
+
+        ax.plot(x, amp / np.max(amp) if NORM else amp,
+                label="{}-OCT {}\n".format(MODE.name, desc) + LOCATION)
+        if phase:
+            ax_pha.plot(x, ang,
+                        label="{}-OCT {}\n".format(MODE.name, desc) + LOCATION)
+
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.axvline(x=d[i], color='k', linestyle='--')
+    if phase:
+        ax_pha.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        ax_pha.axvline(x=d[i], color='k', linestyle='--')
+
+    fig.suptitle(("Axial PSF\n" + DEFOCUS).format(d[i]))
+
+    ax.set_ylabel("Normalized amplitude [a.u.]" if NORM else OCT_PSF_AMP_LABEL + oct_psf_unit(
+        ('ISAM' not in desc) and (NORMALIZE and MODE == IMG_MODE.PSFD)
+    ))
+    if phase:
+        ax_pha.set_ylabel(OCT_PSF_PHASE_LABEL)
+
+    if ZR:
+        fig.supxlabel(RECONST_AXIAL_LABEL)
+    else:
+        if NBG:
+            fig.supxlabel(DEPTH_LABEL)
+        else:
+            fig.supxlabel(OPL_LABEL)
+
+    plt.show()
+
+
+def plot_psfs_xl(psf_dict: PSFDict, y_i: int | None = None,
+                 TRANSPOSE: bool = False):
     psf = psf_dict['psf']
     xd = psf_dict['x']
     d = psf_dict['defocus']
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -835,10 +1278,10 @@ def plot_psfs_xl(psf_dict: PSFDict, y_i: int | None = None):
 
     for i in range(d.size):
         pcm = ax.pcolormesh(
-            ld[:, i], xd,
-            np.abs(psf[
-                y_i, :, i, :
-            ]),
+            *swap(ld[:, i], xd, TRANSPOSE),
+            np.abs(
+                psf[y_i, :, i, :].T if TRANSPOSE else psf[y_i, :, i, :]
+            ),
         )
     ax.set_aspect('equal')
     ax.set_title(("{}-OCT X-slice {} PSFs\n" + LOCATION_Y).format(
@@ -846,8 +1289,13 @@ def plot_psfs_xl(psf_dict: PSFDict, y_i: int | None = None):
     if ZR:
         ax.set_xlabel(RECONST_AXIAL_LABEL)
     else:
-        ax.set_xlabel(OPL_LABEL)
+        if NBG:
+            ax.set_xlabel(DEPTH_LABEL)
+        else:
+            ax.set_xlabel(OPL_LABEL)
     ax.set_ylabel(HORIZONTAL_LABEL)
+    if TRANSPOSE:
+        swap_axes(ax)
     ax.set_facecolor(colors[0])
     cbar = fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(False))
     cbar.set_ticks([])
@@ -855,13 +1303,20 @@ def plot_psfs_xl(psf_dict: PSFDict, y_i: int | None = None):
     plt.show()
 
 
-def plot_psfs_yl(psf_dict: PSFDict, x_i: int | None = None):
+def plot_psfs_yl(psf_dict: PSFDict, x_i: int | None = None,
+                 TRANSPOSE: bool = False):
     psf = psf_dict['psf']
     xd = psf_dict['x']
     d = psf_dict['defocus']
     try:
         ld = psf_dict['opl']
         ZR = False
+        try:
+            nb = psf_dict['nb']
+            ld = ld / nb
+            NBG = True
+        except KeyError:
+            NBG = False
     except KeyError:
         ld = psf_dict['z']
         ZR = True
@@ -877,10 +1332,10 @@ def plot_psfs_yl(psf_dict: PSFDict, x_i: int | None = None):
 
     for i in range(d.size):
         pcm = ax.pcolormesh(
-            ld[:, i], xd,
-            np.abs(psf[
-                :, x_i, i, :
-            ]),
+            *swap(ld[:, i], xd, TRANSPOSE),
+            np.abs(
+                psf[:, x_i, i, :].T if TRANSPOSE else psf[:, x_i, i, :]
+            ),
         )
     ax.set_aspect('equal')
     ax.set_title(("{}-OCT Y-slice {} PSFs\n" + LOCATION_X).format(
@@ -888,8 +1343,13 @@ def plot_psfs_yl(psf_dict: PSFDict, x_i: int | None = None):
     if ZR:
         ax.set_xlabel(RECONST_AXIAL_LABEL)
     else:
-        ax.set_xlabel(OPL_LABEL)
+        if NBG:
+            ax.set_xlabel(DEPTH_LABEL)
+        else:
+            ax.set_xlabel(OPL_LABEL)
     ax.set_ylabel(VERTICAL_LABEL)
+    if TRANSPOSE:
+        swap_axes(ax)
     ax.set_facecolor(colors[0])
     cbar = fig.colorbar(pcm, label=OCT_PSF_AMP_LABEL + oct_psf_unit(False))
     cbar.set_ticks([])
@@ -1003,12 +1463,15 @@ def plot_3Dpupil(pupil: Pupil3D, σx: NDArray, σy: NDArray, NAME: str = ''):
 def plot_wavefronterror(pupil: AberratedPupil3D, σx: NDArray, σy: NDArray,
                         NAME: str = ''):
     pupil.set_wavefront_error(σx, σy)
-    W_ill = pupil.we
+    W = pupil.we
 
     plt.figure()
     plt.pcolormesh(
         σx, σy,
-        W_ill,
+        W,
+        cmap='RdBu_r',
+        vmin=-np.nanmax(np.abs(W)),
+        vmax=np.nanmax(np.abs(W))
     )
     plt.gca().set_aspect('equal')
     plt.ylabel(VERTICAL_COS_LABEL)
@@ -1023,37 +1486,44 @@ def plot_ctf_xz_reim(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
                      νy_i: int, λ: float,
                      NORMALIZE: bool, img_mode: IMG_MODE,
                      νz12: List | None = None,
-                     Hmax: float | None = None):
+                     Hmax: float | None = None,
+                     TRANSPOSE: bool = False):
 
     if Hmax is None:
         Hmax = np.max(np.abs(H))
 
     fig, (ax_re, ax_im) = plt.subplots(
-        1, 2,
+        *swap(1, 2, TRANSPOSE),
         layout='compressed',
         sharex=True, sharey=True
     )
 
     pcm_re = ax_re.pcolormesh(
-        νz, νx,
-        (H.real[νy_i]),
+        *swap(νz, νx, TRANSPOSE),
+        H.real[νy_i].T if TRANSPOSE else H.real[νy_i],
         vmin=-Hmax, vmax=Hmax,
         cmap='PiYG'
     )
     if νz12 is not None:
-        ax_re.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_re.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_re.set_xlim(νz12[0], νz12[1])
     ax_re.set_aspect('equal')
     fig.colorbar(pcm_re, label=CTF_REAL_LABEL + ctf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
     ax_re.set_title("Real part")
 
     pcm_im = ax_im.pcolormesh(
-        νz, νx,
-        (H.imag[νy_i]),
+        *swap(νz, νx, TRANSPOSE),
+        H.imag[νy_i].T if TRANSPOSE else H.imag[νy_i],
         vmin=-Hmax, vmax=Hmax,
         cmap='PiYG'
     )
     if νz12 is not None:
-        ax_im.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_im.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_im.set_xlim(νz12[0], νz12[1])
     ax_im.set_aspect('equal')
     fig.colorbar(pcm_im, label=CTF_IMAG_LABEL + ctf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
     ax_im.set_title("Imaginary part")
@@ -1066,6 +1536,8 @@ def plot_ctf_xz_reim(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
             λ, νy[νy_i]
         )
     )
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -1079,13 +1551,14 @@ def plot_ctf_xz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
                        NORMALIZE: bool, img_mode: IMG_MODE,
                        νz12: List | None = None,
                        Hmax: float | None = None,
-                       log: bool = False):
+                       log: bool = False,
+                       TRANSPOSE: bool = False):
 
     if Hmax is None:
         Hmax = np.max(np.abs(H))
 
     fig, (ax_amp, ax_pha) = plt.subplots(
-        1, 2,
+        *swap(1, 2, TRANSPOSE),
         layout='compressed',
         sharex=True, sharey=True,
     )
@@ -1096,26 +1569,32 @@ def plot_ctf_xz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
         norm = Normalize(vmin=0, vmax=Hmax)
 
     pcm_amp = ax_amp.pcolormesh(
-        νz, νx,
-        np.abs(H[νy_i]),
+        *swap(νz, νx, TRANSPOSE),
+        np.abs(H[νy_i].T if TRANSPOSE else H[νy_i]),
         norm=norm,
     )
     ax_amp.set_aspect('equal')
     fig.colorbar(pcm_amp, label=CTF_AMP_LABEL + ctf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
     if νz12 is not None:
-        ax_amp.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_amp.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_amp.set_xlim(νz12[0], νz12[1])
     ax_amp.set_title("Magnitude")
 
     pcm_pha = ax_pha.pcolormesh(
-        νz, νx,
-        np.angle(H[νy_i]),
+        *swap(νz, νx, TRANSPOSE),
+        np.angle(H[νy_i].T if TRANSPOSE else H[νy_i]),
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
     ax_pha.set_aspect('equal')
     fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     if νz12 is not None:
-        ax_pha.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_pha.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_pha.set_xlim(νz12[0], νz12[1])
     ax_pha.set_title("Phase")
 
     fig.supxlabel(AXIAL_FREQ_LABEL)
@@ -1126,6 +1605,8 @@ def plot_ctf_xz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
             λ, νy[νy_i]
         )
     )
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -1138,38 +1619,45 @@ def plot_ctf_yz_reim(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
                      νx_i: int, λ: float,
                      NORMALIZE: bool, img_mode: IMG_MODE,
                      νz12: List | None = None,
-                     Hmax: float | None = None):
+                     Hmax: float | None = None,
+                     TRANSPOSE: bool = False):
 
     if Hmax is None:
         Hmax = np.max(np.abs(H))
 
     fig, (ax_re, ax_im) = plt.subplots(
-        1, 2,
+        *swap(1, 2, TRANSPOSE),
         layout='compressed',
         sharex=True, sharey=True,
         subplot_kw=dict(box_aspect=1)
     )
 
     pcm_re = ax_re.pcolormesh(
-        νz, νy,
-        (H.real[:, νx_i]),
+        *swap(νz, νy, TRANSPOSE),
+        H.real[:, νx_i].T if TRANSPOSE else H.real[:, νx_i],
         vmin=-Hmax, vmax=Hmax,
         cmap='PiYG'
     )
     if νz12 is not None:
-        ax_re.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_re.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_re.set_xlim(νz12[0], νz12[1])
     ax_re.set_aspect('equal', adjustable='box')
     fig.colorbar(pcm_re, label=CTF_REAL_LABEL + ctf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
     ax_re.set_title("Real part")
 
     pcm_im = ax_im.pcolormesh(
-        νz, νy,
-        (H.imag[:, νx_i]),
+        *swap(νz, νy, TRANSPOSE),
+        H.imag[:, νx_i].T if TRANSPOSE else H.imag[:, νx_i],
         vmin=-Hmax, vmax=Hmax,
         cmap='PiYG'
     )
     if νz12 is not None:
-        ax_im.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_im.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_im.set_xlim(νz12[0], νz12[1])
     ax_im.set_aspect('equal', adjustable='box')
     fig.colorbar(pcm_im, label=CTF_IMAG_LABEL + ctf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
     ax_im.set_title("Imaginary part")
@@ -1182,6 +1670,8 @@ def plot_ctf_yz_reim(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
             λ, νx[νx_i]
         )
     )
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -1195,13 +1685,14 @@ def plot_ctf_yz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
                        NORMALIZE: bool, img_mode: IMG_MODE,
                        νz12: List | None = None,
                        Hmax: float | None = None,
-                       log: bool = False):
+                       log: bool = False,
+                       TRANSPOSE: bool = False):
 
     if Hmax is None:
         Hmax = np.max(np.abs(H))
 
     fig, (ax_amp, ax_pha) = plt.subplots(
-        1, 2,
+        *swap(1, 2, TRANSPOSE),
         layout='compressed',
         sharex=True, sharey=True
     )
@@ -1212,26 +1703,32 @@ def plot_ctf_yz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
         norm = Normalize(vmin=0, vmax=Hmax)
 
     pcm_amp = ax_amp.pcolormesh(
-        νz, νy,
-        np.abs(H[:, νx_i]),
+        *swap(νz, νy, TRANSPOSE),
+        np.abs(H[:, νx_i]. T if TRANSPOSE else H[:, νx_i]),
         norm=norm,
     )
     ax_amp.set_aspect('equal')
     fig.colorbar(pcm_amp, label=CTF_AMP_LABEL + ctf_unit(NORMALIZE and img_mode == IMG_MODE.PSFD))
     if νz12 is not None:
-        ax_amp.set_xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_amp.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_amp.set_xlim(νz12[0], νz12[1])
     ax_amp.set_title("Magnitude")
 
     pcm_pha = ax_pha.pcolormesh(
-        νz, νy,
-        np.angle(H[:, νx_i]),
+        *swap(νz, νy, TRANSPOSE),
+        np.angle(H[:, νx_i].T if TRANSPOSE else H[:, νx_i]),
         vmin=-np.pi, vmax=np.pi,
         cmap='twilight'
     )
     ax_pha.set_aspect('equal')
     fig.colorbar(pcm_pha, label=CTF_PHASE_LABEL, ticks=radian_ticks, format=radian_tick_format)
     if νz12 is not None:
-        ax_pha.xlim(νz12[0], νz12[1])
+        if TRANSPOSE:
+            ax_pha.set_ylim(νz12[0], νz12[1])
+        else:
+            ax_pha.set_xlim(νz12[0], νz12[1])
     ax_pha.set_title("Phase")
 
     fig.supxlabel(AXIAL_FREQ_LABEL)
@@ -1242,6 +1739,8 @@ def plot_ctf_yz_amppha(H: NDArray, νx: NDArray, νy: NDArray, νz: NDArray,
             λ, νx[νx_i]
         )
     )
+    if TRANSPOSE:
+        swap_supaxes(fig)
 
     fig.draw_without_rendering()
     tb = fig.get_tightbbox(fig.canvas.get_renderer())
@@ -1346,3 +1845,26 @@ def plot_ctf_xy_amppha(H: NDArray, νx: NDArray, νy: NDArray,
     )
 
     plt.show()
+
+
+def swap_axes(ax: Axes):
+    xlabel = ax.get_xaxis().get_label().get_text()
+    ylabel = ax.get_yaxis().get_label().get_text()
+    ax.set_xlabel(ylabel)
+    ax.set_ylabel(xlabel)
+    ax.invert_yaxis()
+
+
+def swap_supaxes(fig: Figure):
+    xlabel = fig.get_supxlabel()
+    ylabel = fig.get_supylabel()
+    fig.supxlabel(ylabel)
+    fig.supylabel(xlabel)
+    fig.get_axes()[0].invert_yaxis()
+
+
+def swap(a, b, TRANSPOSE: bool = False):
+    if TRANSPOSE:
+        return b, a
+    else:
+        return a, b
